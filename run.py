@@ -87,12 +87,48 @@ def scrape_followers(bot, username, user_input):
     with open(f'{username}_followers.txt', 'a') as file:
         file.write('\n'.join(users) + "\n")
     
-    df = pd.DataFrame(users, columns=['Username'])  # Creating a DataFrame
+    # df = pd.DataFrame(users, columns=['Username'])  # Creating a DataFrame
 
-    print(f"[Info] - Saving followers for {username} to CSV...")
-    df.to_csv(f'{username}_followers.csv', index=False)  
+    # print(f"[Info] - Saving followers for {username} to CSV...")
+    # df.to_csv(f'{username}_followers.csv', index=False) 
+
+    return users
 
 
+def scrape_following(bot, username, user_input):
+    bot.get(f'https://www.instagram.com/{username}/')
+    time.sleep(3.5)
+    WebDriverWait(bot, TIMEOUT).until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/following')]"))).click()
+    time.sleep(2)
+    print(f"[Info] - Scraping following for {username}...")
+
+    users = set()
+
+    while len(users) < user_input:
+        following = bot.find_elements(By.XPATH, "//a[contains(@href, '/')]")
+
+        for i in following:
+            if i.get_attribute('href') and '/p/' not in i.get_attribute('href'):
+                users.add(i.get_attribute('href').split("/")[3])
+            else:
+                continue
+
+        ActionChains(bot).send_keys(Keys.END).perform()
+        time.sleep(1)
+
+    users = list(users)[:user_input]  
+    print(users)
+    print(f"[Info] - Saving following for {username}...")
+    with open(f'{username}_following.txt', 'a') as file:
+        file.write('\n'.join(users) + "\n")
+
+    # df = pd.DataFrame(users, columns=['Username']) 
+    # print(f"[Info] - Saving following for {username} to CSV...")
+    # df.to_csv(f'{username}_following.csv', index=False)
+
+    return users
+
+    
 def scrape():
     credentials = load_credentials()
 
@@ -122,10 +158,17 @@ def scrape():
 
     for user in usernames:
         user = user.strip()
-        scrape_followers(bot, user, user_input)
+        followers_list = scrape_followers(bot, user, user_input)
+        following_list = scrape_following(bot, user, user_input)
 
     bot.quit()
+    print('sorted lists')
+    print(sorted(followers_list))
+    print(sorted(following_list))
 
+    df = pd.DataFrame(users, columns=['Username']) 
+    print(f"[Info] - Saving following for {username} to CSV...")
+    df.to_csv(f'{username}_following.csv', index=False)
 
 if __name__ == '__main__':
     TIMEOUT = 15
