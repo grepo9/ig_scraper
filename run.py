@@ -1,5 +1,5 @@
 import time
-import os
+import os, re
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -60,6 +60,13 @@ def login(bot, username, password):
     time.sleep(10)
 
 
+def is_valid_username(username):
+    """Check if the provided username is valid according to Instagram's standards."""
+    if re.match(r'^[a-zA-Z0-9._]{1,30}$', username):
+        return True
+    return False
+
+
 def scrape_followers(bot, username, user_input):
     bot.get(f'https://www.instagram.com/{username}/')
     time.sleep(3.5)
@@ -68,32 +75,34 @@ def scrape_followers(bot, username, user_input):
     print(f"[Info] - Scraping followers for {username}...")
 
     users = set()
+    last_count = 0
+    attempts = 0
 
     while len(users) < user_input:
         followers = bot.find_elements(By.XPATH, "//a[contains(@href, '/')]")
-
         for i in followers:
-            if i.get_attribute('href'):
-                users.add(i.get_attribute('href').split("/")[3])
-            else:
-                continue
+            potential_user = i.get_attribute('href').split("/")[-2]
+            if is_valid_username(potential_user):
+                users.add(potential_user)
 
+        if len(users) == last_count:
+            attempts += 1
+        else:
+            attempts = 0
+
+        if attempts > 3:  # Allow a few attempts in case of slow loading but stop if stuck
+            print(f"[Info] - Stopped scraping. Found only {len(users)} followers.")
+            break
+
+        last_count = len(users)
         ActionChains(bot).send_keys(Keys.END).perform()
-        time.sleep(1)
+        time.sleep(2)
 
-    users = list(users)[:user_input]  # Trim the user list to match the desired number of followers
+    users = list(users)[:user_input]
     print(users)
-    print(f"[Info] - Saving followers for {username}...")
     with open(f'{username}_followers.txt', 'a') as file:
         file.write('\n'.join(users) + "\n")
-    
-    # df = pd.DataFrame(users, columns=['Username'])  # Creating a DataFrame
-
-    # print(f"[Info] - Saving followers for {username} to CSV...")
-    # df.to_csv(f'{username}_followers.csv', index=False) 
-
     return users
-
 
 def scrape_following(bot, username, user_input):
     bot.get(f'https://www.instagram.com/{username}/')
@@ -103,73 +112,84 @@ def scrape_following(bot, username, user_input):
     print(f"[Info] - Scraping following for {username}...")
 
     users = set()
+    last_count = 0
+    attempts = 0
 
     while len(users) < user_input:
         following = bot.find_elements(By.XPATH, "//a[contains(@href, '/')]")
-
         for i in following:
-            if i.get_attribute('href') and '/p/' not in i.get_attribute('href'):
-                users.add(i.get_attribute('href').split("/")[3])
-            else:
-                continue
+            potential_user = i.get_attribute('href').split("/")[-2]
+            if is_valid_username(potential_user):
+                users.add(potential_user)
 
+        if len(users) == last_count:
+            attempts += 1
+        else:
+            attempts = 0
+
+        if attempts > 3:  # Allow a few attempts in case of slow loading but stop if stuck
+            print(f"[Info] - Stopped scraping. Found only {len(users)} following.")
+            break
+
+        last_count = len(users)
         ActionChains(bot).send_keys(Keys.END).perform()
-        time.sleep(1)
+        time.sleep(2)
 
-    users = list(users)[:user_input]  
+    users = list(users)[:user_input]
     print(users)
-    print(f"[Info] - Saving following for {username}...")
     with open(f'{username}_following.txt', 'a') as file:
         file.write('\n'.join(users) + "\n")
-
-    # df = pd.DataFrame(users, columns=['Username']) 
-    # print(f"[Info] - Saving following for {username} to CSV...")
-    # df.to_csv(f'{username}_following.csv', index=False)
-
     return users
 
-    
+
+
+def compare_followers_following(followers, following, username, filename="mutual_status.txt"):
+    filename = f"{username}_{filename}"  # Prepend the username to the filename
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write("{:<30} | {:<10}\n".format("Username", "Relationship"))
+        file.write("-" * 42 + "\n")
+        all_users = followers.union(following)
+        for user in sorted(all_users):
+            if user in followers and user in following:
+                file.write("{:<30} | {:<10}\n".format(user, "✔ (Mutual)"))
+            elif user in following:
+                file.write("{:<30} | {:<10}\n".format(user, "✘ (One-sided)"))
+
+
+
 def scrape():
     credentials = load_credentials()
-
     if credentials is None:
         username, password = prompt_credentials()
     else:
         username, password = credentials
 
     user_input = int(input('[Required] - How many followers do you want to scrape (100-2000 recommended): '))
-
     usernames = input("Enter the Instagram usernames you want to scrape (separated by commas): ").split(",")
 
-    service = Service()
     options = webdriver.ChromeOptions()
-    # options.add_argument("--headless")
     options.add_argument('--no-sandbox')
     options.add_argument("--log-level=3")
-    mobile_emulation = {
-        "userAgent": "Mozilla/5.0 (Linux; Android 4.2.1; en-us; Nexus 5 Build/JOP40D) AppleWebKit/535.19 (KHTML, like Gecko) Chrome/90.0.1025.166 Mobile Safari/535.19"}
+    mobile_emulation = {"userAgent": "Mozilla/5.0 (Linux; Android 4.2.1; en-us; Nexus 5 Build/JOP40D) AppleWebKit/535.19 (KHTML, like Gecko) Chrome/90.0.1025.166 Mobile Safari/535.19"}
     options.add_experimental_option("mobileEmulation", mobile_emulation)
 
-
     bot = webdriver.Chrome(service=Service(CM().install()), options=options)
-    bot.set_page_load_timeout(15) # Set the page load timeout to 15 seconds
+    bot.set_page_load_timeout(15)
 
     login(bot, username, password)
 
     for user in usernames:
         user = user.strip()
+        if not is_valid_username(user):
+            print(f"[Error] - {user} is not a valid Instagram username.")
+            continue
         followers_list = scrape_followers(bot, user, user_input)
         following_list = scrape_following(bot, user, user_input)
+        compare_followers_following(set(followers_list), set(following_list), user)  # Pass username here
 
     bot.quit()
-    print('sorted lists')
-    print(sorted(followers_list))
-    print(sorted(following_list))
-
-    df = pd.DataFrame(users, columns=['Username']) 
-    print(f"[Info] - Saving following for {username} to CSV...")
-    df.to_csv(f'{username}_following.csv', index=False)
 
 if __name__ == '__main__':
     TIMEOUT = 15
     scrape()
+
